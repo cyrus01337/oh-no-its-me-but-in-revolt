@@ -1,3 +1,7 @@
+import pathlib
+import sys
+import traceback
+
 import dotenv
 import revolt
 from revolt.ext import commands
@@ -7,14 +11,31 @@ class Bot(commands.CommandsClient):
     def __init__(self, session, *args, **kwargs):
         self.initialised = False
         self.env = dotenv.dotenv_values(".env")
-
         token = self.env.pop("TOKEN")
 
         super().__init__(session, token, *args, **kwargs)
+        self.load_cogs()
 
-    async def _startup_hook(self):
-        prefix = self.env["PREFIX"]
-        print(f'{self.user.name} is up with prefix "{prefix}"!', end="\n\n")
+    def load_extension(self, path: str):
+        super().load_extension(path)
+        self.dispatch("extension_loaded", path)
+
+    def load_cogs(self):
+        for file in pathlib.Path("./src/cogs").glob("./**/*.py"):
+            extension = f"src.cogs.{file.stem}"
+
+            try:
+                self.load_extension(extension)
+            except Exception as error:
+                self.dispatch("extension_failed", error, extension)
+
+    async def on_extension_loaded(self, extension: str):
+        print(f"✔️ Successfully loaded {extension}")
+
+    async def on_extension_failed(self, error: Exception, extension: str):
+        print(f"❌ Failed to load {extension}")
+
+        raise error
 
     async def on_ready(self):
         if self.initialised:
@@ -22,7 +43,12 @@ class Bot(commands.CommandsClient):
 
         self.initialised = True
 
-        await self._startup_hook()
+        self.dispatch("startup")
+
+    async def on_startup(self):
+        prefix = self.env["PREFIX"]
+
+        print(f'\n{self.user.name} is up with prefix "{prefix}"!', end="\n\n")
 
     async def get_prefix(self, message: revolt.Message):
         prefix = self.env["PREFIX"]
@@ -32,12 +58,3 @@ class Bot(commands.CommandsClient):
             return [prefix, ""]
 
         return prefix
-
-    async def on_message(self, message: revolt.Message):
-        print(message.content)
-
-        await self.process_commands(message)
-
-    @commands.command()
-    async def say(self, ctx: commands.Context, *, message: str):
-        await ctx.send(message)
